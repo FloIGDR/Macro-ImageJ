@@ -1,0 +1,184 @@
+macro "Screening Analysis"{
+
+var m_stepdelay;
+var m_gatewidth;
+var m_threshold;
+	run("Set Measurements...", "mean min integrated redirect=None decimal=0");
+	Dialog.create("Analyse");
+	Dialog.addString("Voulez-vous analyser ensuite?", "non")
+	Dialog.show();
+	reponse=Dialog.getString()
+	if (reponse=="non") {
+	
+	Dialog.create("Settings");
+  	Dialog.addNumber("stepdelay", 2200);
+  	Dialog.addNumber("gatewidth", 2200);
+  	Dialog.addNumber("threshold", 3000);
+  	Dialog.show()
+
+	m_stepdelay = Dialog.getNumber();
+	m_gatewidth = Dialog.getNumber();
+	m_threshold = Dialog.getNumber();
+	
+	fluoDir = getDirectory("Choose the fluo directory");
+	outputDir = getDirectory("Choose the flim directory");
+	outputTrie = getDirectory("Choose the fluo trie directory");
+
+	fluoFilesInit = getFileList(fluoDir);
+	fluoFiles = Array.sort(fluoFilesInit) ;
+
+
+	// main loop to process images
+	for(f=0 ; f < fluoFiles.length ; f++){
+	
+		fluoFile = fluoDir + fluoFiles[f];
+		outputfluo = outputTrie + fluoFiles[f] ;
+		outputImage = outputDir + replace(fluoFiles[f],".stk","") + ".tif";
+		open(fluoFile);
+		run("Measure");
+		max=getResult("Max",0) ;
+		close() ;
+		run("Clear Results");		
+		if (max>=m_threshold) {
+		calculFlim(fluoFile, outputImage,outputfluo,m_stepdelay,m_gatewidth,m_threshold);
+	}
+	}	
+
+} else if (reponse=="oui") {
+	
+	Dialog.create("Threshold");
+	Dialog.addNumber("Nombre de threshold", 1);
+	Dialog.show()
+	t_thresh=Dialog.getNumber() ;
+
+	methods = getList("threshold.methods");
+
+	Dialog.create("Settings");
+  	Dialog.addNumber("Sigma gaussian blur:", 1);
+  	Dialog.addChoice("Threshold", methods, "Default");
+	Dialog.show();
+
+	m_sigma = Dialog.getNumber();
+	c_threshold = Dialog.getChoice();
+
+	
+	Dialog.create("Settings");
+  	Dialog.addNumber("stepdelay", 2200);
+  	Dialog.addNumber("gatewidth", 2200);
+  	Dialog.addNumber("threshold", 3000);
+  	Dialog.show()
+
+	m_stepdelay = Dialog.getNumber();
+	m_gatewidth = Dialog.getNumber();
+	m_threshold = Dialog.getNumber();
+	
+  	
+	fluoDir = getDirectory("Choose the fluo directory");
+	outputDir = getDirectory("Choose the flim directory");
+	outputTrie = getDirectory("Choose the fluo trie directory");
+	outputDir2 = getDirectory("Choose the output directory");
+
+
+	fluoFilesInit = getFileList(fluoDir);
+	fluoFiles = Array.sort(fluoFilesInit) ;
+
+
+	// main loop to process images
+	for(f=0 ; f < fluoFiles.length ; f++){
+	
+		fluoFile = fluoDir + fluoFiles[f];
+		outputfluo = outputTrie + fluoFiles[f] ;
+		outputImage = outputDir + replace(fluoFiles[f],".stk","") + ".tif";
+		
+		
+		open(fluoFile);
+		run("Measure");
+		max=getResult("Max",0) ;
+		close() ;
+		run("Clear Results");		
+		if (max>=m_threshold) {
+		calculFlim(fluoFile, outputImage,outputfluo,m_stepdelay,m_gatewidth,m_threshold);
+	}
+	}
+	
+	fluoFilesInit = getFileList(outputTrie);
+	fluoFiles = Array.sort(fluoFilesInit) ;
+	
+	flimDirInit = getFileList(outputDir);
+	flimFiles =  Array.sort(flimDirInit) ;
+	
+	outputFile = outputDir2 + "measures.csv";
+	File.append("image \t roi idx \t Mean flim", outputFile);
+
+	for(f=0 ; f < fluoFiles.length ; f++){
+	
+		fluoFile = outputTrie + fluoFiles[f];
+		flimFile = outputDir + flimFiles[f];
+		outputImage = outputDir2 + fluoFiles[f] + ".png";
+		
+		ProcessFile(fluoFile, flimFile, fluoFiles[f], outputFile, outputImage);
+	}
+	
+}
+}
+
+
+
+
+function calculFlim(fluoFile, outputImage,outputfluo,m_stepdelay,m_gatewidth,m_threshold){
+	
+
+	open(fluoFile);
+	saveAs("TIF", outputfluo);
+	run("Flim", "stepdelay="+m_stepdelay+" gatewidth="+m_gatewidth+" threshold="+m_threshold);
+	saveAs("TIF", outputImage);
+	run("Close All");
+	run("Clear Results");
+}
+
+function ProcessFile(fluoFile, flimFile, fluoImageName, outputFile, outputImage){
+
+	
+
+	// init output file
+	File.append(fluoImageName + "\t  \t ", outputFile);
+	
+	// Segment cells in original image
+	open(fluoFile);
+	run("Duplicate...", " ");
+	run("Gaussian Blur...", "sigma="+m_sigma);
+	setAutoThreshold(c_threshold + " dark");
+	setOption("BlackBackground", true);
+	run("Convert to Mask");
+	run("Watershed");
+	run("Set Measurements...", "mean integrated redirect=None decimal=0");
+	run("Analyze Particles...", "  show=Outlines display clear include add");
+	
+	// Measure Flim inside cells
+	open(flimFile);
+	flimImageTitle = getTitle();
+	// set background to NaN
+	run("32-bit");
+	setThreshold(500.0000, 4000.0000);
+	run("NaN Background");
+	
+	cellCount = roiManager("count");
+	for(i=0;i<cellCount;i++){
+		run("Clear Results");
+		roiManager("Select", i);
+		roiManager("Measure");
+		val = getResult("Mean", 0);
+		if(val > 0){
+			pos = i+1;
+			File.append(" \t" + pos + "\t" + val, outputFile);
+		}
+	}
+	// save overlay image
+	selectWindow(flimImageTitle);
+	roiManager("Show All");
+	run("Flatten");
+	saveAs("PNG", outputImage);
+	run("Close All");
+	run("Clear Results");
+}
+ 
